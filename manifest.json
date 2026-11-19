@@ -1,7 +1,7 @@
 {
   "id": "./",
-  "name": "Tribal Wars Planner",
-  "short_name": "TW Planner",
+  "name": "Tribal Wars ZC Finder",
+  "short_name": "ZC Finder",
   "description": "Planner für Ziellaufzeiten und Zwischen-Cleaner",
   "lang": "de",
   "start_url": "./",
