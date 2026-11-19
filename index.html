@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#0f1220">
+<link rel="manifest" href="./manifest.json">
+<title>Planner V31</title>
+
+<style>
+:root{
+  --bg:#0f1220;
+  --card:#171a2b;
+  --card2:#1f2340;
+  --text:#e7e9ff;
+  --muted:#a9aed6;
+  --accent:#6aa6ff;
+  --danger:#ff5c7a;
+  --border:rgba(255,255,255,0.08);
+}
+body{margin:0;font-family:Arial,sans-serif;background:var(--bg);color:var(--text);padding:20px;}
+h2{margin-top:0;}
+.block{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:20px;}
+h3{margin:10px 0 8px;}
+textarea,input,select{width:100%;max-width:420px;padding:10px;border-radius:8px;border:1px solid var(--border);background:var(--card2);color:var(--text);outline:none;box-sizing:border-box;}
+label{display:block;margin-top:10px;margin-bottom:4px;color:var(--muted);font-size:13px;}
+button{background:var(--accent);border:none;color:#0b1020;padding:8px 12px;border-radius:8px;cursor:pointer;margin:6px 6px 6px 0;font-weight:bold;}
+button:hover{opacity:0.9;}
+button:active{transform:scale(0.98);}
+hr{border:none;border-top:1px solid var(--border);margin:25px 0;}
+.hidden{display:none;}
+.result{margin-top:10px;padding:10px;background:var(--card2);border-radius:10px;border:1px solid var(--border);}
+.red{color:var(--danger);font-weight:bold;}
+.small{color:var(--muted);font-size:13px;}
+.time-inputs{display:flex;gap:10px;flex-wrap:wrap;}
+.time-inputs div{width:110px;}
+.time-inputs input{width:100%;}
+.result-item{border-bottom:1px solid var(--border);padding:8px 0;}
+.result-item:last-child{border-bottom:none;}
+.highlight{color:var(--accent);font-weight:bold;}
+.tabs{display:flex;gap:8px;margin:12px 0 18px;flex-wrap:wrap;}
+.tab-button{background:var(--card2);color:var(--text);border:1px solid var(--border);padding:10px 16px;border-radius:8px;}
+.tab-button.active{background:var(--accent);color:#0b1020;}
+.tab-content{padding-top:4px;}
+</style>
+</head>
+
+<body>
+<h2>⚔️ Planner V31</h2>
+<button onclick="location.reload()">🔄 Reset</button>
+
+<div class="block">
+<h3>🎯 1. Ziellaufzeit festlegen</h3>
+<div class="tabs">
+  <button id="tabManual" class="tab-button active" onclick="switchTab('manual')">Laufzeit eintragen</button>
+  <button id="tabAG" class="tab-button" onclick="switchTab('ag')">AG Laufzeit berechnen</button>
+</div>
+
+<div id="manualTab" class="tab-content">
+  <h3>⏱️ Laufzeit manuell eingeben</h3>
+  <label>Gewünschte Laufzeit</label>
+  <div class="time-inputs">
+    <div><label>Stunden</label><input type="number" id="runtimeHours" min="0" value="0"></div>
+    <div><label>Minuten</label><input type="number" id="runtimeMinutes" min="0" max="59" value="0"></div>
+    <div><label>Sekunden</label><input type="number" id="runtimeSeconds" min="0" max="59" value="0"></div>
+  </div>
+  <label>Angedachtes Zieldorf (XXX|YYY)</label>
+  <input type="text" id="targetVillage" placeholder="z.B. 500|500">
+  <button onclick="calculateStep1()">Vorgabe übernehmen</button>
+</div>
+
+<div id="agTab" class="tab-content hidden">
+  <h3>⚔️ Laufzeit der AG berechnen</h3>
+  <p class="small">Gib Start- und Zielkoordinaten ein. Die Laufzeit wird anhand der Entfernung und der Adelgeschwindigkeit berechnet.</p>
+  <label>Startdorf (XXX|YYY)</label>
+  <input type="text" id="agStartVillage" placeholder="z.B. 501|499">
+  <label>Zieldorf (XXX|YYY)</label>
+  <input type="text" id="agTargetVillage" placeholder="z.B. 500|500">
+  <button onclick="calculateAGRuntime()">AG-Laufzeit berechnen &amp; übernehmen</button>
+  <div id="agResult" class="result"></div>
+</div>
+<div id="step1Result" class="result"></div>
+</div>
+
+<hr>
+
+<div id="step2Container" class="hidden">
+<div class="block">
+<h3>🚀 2. Zwischen-Cleaner suchen</h3>
+<p class="small">Gib deine verfügbaren Startdörfer ein. Es werden die 5 besten Kombinationen aus Startdorf und Einheit gesucht. Die Laufzeit muss länger als die gewünschte Ziellaufzeit sein.</p>
+<textarea id="followVillages" placeholder="Startdörfer eingeben..."></textarea>
+<button onclick="extractToField('followVillages','followLabel')">Extrahieren</button>
+<h3 id="followLabel">Startdörfer</h3>
+<button onclick="calcCleaner()">Berechnen</button>
+<div id="step2_1" class="result"></div>
+</div>
+</div>
+
+<hr>
+
+<div class="block">
+<h3>📄 Export</h3>
+<button id="expClean" onclick="exportTXT('cleaner')" style="display:none">Zwischen-Cleaner</button>
+<p class="small">Export basiert auf den aktuell berechneten Daten.</p>
+</div>
+
+<script>
+const nobleSpeed = 35;
+let targetRuntime = 0;
+let targetCoordinate = "";
+let step1Commands = [];
+let cleanerCommands = [];
+
+function switchTab(tab){
+  const manualTab=document.getElementById("manualTab");
+  const agTab=document.getElementById("agTab");
+  const tabManual=document.getElementById("tabManual");
+  const tabAG=document.getElementById("tabAG");
+  if(tab==="manual"){
+    manualTab.classList.remove("hidden"); agTab.classList.add("hidden");
+    tabManual.classList.add("active"); tabAG.classList.remove("active");
+  }else{
+    agTab.classList.remove("hidden"); manualTab.classList.add("hidden");
+    tabAG.classList.add("active"); tabManual.classList.remove("active");
+  }
+}
+
+function formatRuntime(minutes){
+  let totalSeconds=Math.round(minutes*60);
+  let hours=Math.floor(totalSeconds/3600);
+  let mins=Math.floor((totalSeconds%3600)/60);
+  let seconds=totalSeconds%60;
+  return String(hours).padStart(2,"0")+":"+String(mins).padStart(2,"0")+":"+String(seconds).padStart(2,"0");
+}
+
+function extractCoords(text){return text.match(/\b\d{3}\|\d{3}\b/g)||[];}
+
+function extractToField(id,label){
+  let field=document.getElementById(id);
+  let coords=extractCoords(field.value);
+  field.value=coords.join("\n");
+  document.getElementById(label).innerText="Startdörfer ("+coords.length+")";
+}
+
+function parse(c){let [x,y]=c.split("|").map(Number);return {x,y};}
+
+function dist(a,b){return Math.sqrt((a.x-b.x)**2+(a.y-b.y)**2);}
+
+function acceptStep1(runtime,target,source){
+  targetRuntime=runtime;
+  targetCoordinate=target;
+  step1Commands=[{target:targetCoordinate,travel:targetRuntime,type:"Ziellaufzeit",unit:source}];
+  cleanerCommands=[];
+  document.getElementById("step2_1").innerHTML="";
+  document.getElementById("step2Container").classList.remove("hidden");
+  document.getElementById("step1Result").innerHTML=`
+    <h4>Vorgabe übernommen</h4>
+    <p><b>Zieldorf:</b> ${targetCoordinate}<br><b>Gewünschte Laufzeit:</b> <span class="highlight">${formatRuntime(targetRuntime)}</span></p>
+    <p class="small">Eingabe über: ${source}</p>
+    <p class="small">Du kannst jetzt in Schritt 2 deine Startdörfer eingeben.</p>
+  `;
+  document.getElementById("agResult").innerHTML="";
+  updateExportButtons();
+}
+
+function calculateStep1(){
+  let hours=Number(document.getElementById("runtimeHours").value);
+  let minutes=Number(document.getElementById("runtimeMinutes").value);
+  let seconds=Number(document.getElementById("runtimeSeconds").value);
+  let target=document.getElementById("targetVillage").value.trim();
+  let result=document.getElementById("step1Result");
+  if(!Number.isInteger(hours)||hours<0||!Number.isInteger(minutes)||minutes<0||minutes>59||!Number.isInteger(seconds)||seconds<0||seconds>59){
+    result.innerHTML='<p class="red">Bitte eine gültige Laufzeit eingeben.</p>'; return;
+  }
+  if(!/^\d{3}\|\d{3}$/.test(target)){
+    result.innerHTML='<p class="red">Bitte ein gültiges Zieldorf im Format XXX|YYY eingeben.</p>'; return;
+  }
+  let runtime=hours*60+minutes+seconds/60;
+  if(runtime<=0){result.innerHTML='<p class="red">Die gewünschte Laufzeit muss größer als 0 sein.</p>';return;}
+  acceptStep1(runtime,target,"Manuelle Eingabe");
+}
+
+function calculateAGRuntime(){
+  let start=document.getElementById("agStartVillage").value.trim();
+  let target=document.getElementById("agTargetVillage").value.trim();
+  let result=document.getElementById("agResult");
+  if(!/^\d{3}\|\d{3}$/.test(start)){
+    result.innerHTML='<p class="red">Bitte eine gültige Startkoordinate im Format XXX|YYY eingeben.</p>';return;
+  }
+  if(!/^\d{3}\|\d{3}$/.test(target)){
+    result.innerHTML='<p class="red">Bitte eine gültige Zielkoordinate im Format XXX|YYY eingeben.</p>';return;
+  }
+  let startCoords=parse(start);
+  let targetCoords=parse(target);
+  let distance=dist(startCoords,targetCoords);
+  let runtime=distance*nobleSpeed;
+  if(runtime<=0){result.innerHTML='<p class="red">Die berechnete Laufzeit muss größer als 0 sein.</p>';return;}
+  result.innerHTML=`
+    <h4>AG-Laufzeit berechnet</h4>
+    <p><b>Startdorf:</b> ${start}<br><b>Zieldorf:</b> ${target}<br><b>Entfernung:</b> ${distance.toFixed(2)}<br><b>AG-Geschwindigkeit:</b> ${nobleSpeed}<br><b>Berechnete Laufzeit:</b> <span class="highlight">${formatRuntime(runtime)}</span></p>
+  `;
+  acceptStep1(runtime,target,"AG-Berechnung");
+}
+
+const cleanerUnits=[
+  {name:"Ramme",speed:30},
+  {name:"Schwertkämpfer",speed:22},
+  {name:"Axtkämpfer",speed:18},
+  {name:"Schwere Kavallerie",speed:11},
+  {name:"Leichte Kavallerie",speed:10}
+];
+
+function getBest(results){return results.sort((a,b)=>a.diff-b.diff).slice(0,5);}
+
+function calcCleaner(){
+  cleanerCommands=[];
+  let starts=extractCoords(document.getElementById("followVillages").value);
+  let html="<h4>Top 5 Zwischen-Cleaner</h4>";
+  if(!step1Commands.length){
+    html+='<p class="red">Bitte zuerst Schritt 1 berechnen.</p>';
+    document.getElementById("step2_1").innerHTML=html;return;
+  }
+  if(!starts.length){
+    html+='<p class="red">Bitte mindestens ein gültiges Startdorf eingeben.</p>';
+    document.getElementById("step2_1").innerHTML=html;return;
+  }
+  let target=parse(targetCoordinate);
+  let results=[];
+  starts.forEach(start=>{
+    let village=parse(start);
+    cleanerUnits.forEach(unit=>{
+      let travel=dist(village,target)*unit.speed;
+      if(travel>targetRuntime){
+        results.push({start:start,target:targetCoordinate,type:"Zwischen-Cleaner",unit:unit.name,travel:travel,diff:travel-targetRuntime});
+      }
+    });
+  });
+  let best=getBest(results);
+  cleanerCommands=best;
+  if(!best.length){
+    html+=`<p class="red">Keine passenden Zwischen-Cleaner gefunden.</p>
+      <p class="small">Es wurde keine Laufzeit gefunden, die länger als ${formatRuntime(targetRuntime)} ist.</p>`;
+  }else{
+    html+=`<p class="small">Zieldorf: ${targetCoordinate}<br>Gewünschte Laufzeit: ${formatRuntime(targetRuntime)}<br>Gefundene Ergebnisse: ${best.length}</p>`;
+    best.forEach((r,index)=>{
+      html+=`<div class="result-item">
+        <h4>${index+1}. ${r.start} → ${r.target}</h4>
+        Einheit: <b>${r.unit}</b><br>
+        Laufzeit: <span class="highlight">${formatRuntime(r.travel)}</span><br>
+        Zeitüberschreitung: ${formatRuntime(r.diff)}
+      </div>`;
+    });
+  }
+  document.getElementById("step2_1").innerHTML=html;
+  updateExportButtons();
+}
+
+function exportTXT(type){
+  let data=[];
+  if(type==="all"){data=[...step1Commands,...cleanerCommands];}
+  else if(type==="cleaner"){data=cleanerCommands;}
+  if(!data.length){alert("Keine Daten vorhanden");return;}
+  let lines=["Startdorf, Zieldorf, Art, Einheit, Laufzeit, Abweichung"];
+  data.forEach(c=>{
+    lines.push([c.start||"-",c.target,c.type,c.unit,formatRuntime(c.travel),c.diff!==undefined?formatRuntime(c.diff):"-"].join(", "));
+  });
+  let blob=new Blob([lines.join("\n")],{type:"text/plain;charset=utf-8"});
+  let a=document.createElement("a");
+  a.href=URL.createObjectURL(blob);
+  a.download=`export_${type}.txt`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function updateExportButtons(){
+  document.getElementById("expClean").style.display=cleanerCommands.length?"inline-block":"none";
+}
+
+// PWA: Service Worker registrieren, damit die App offline verfügbar bleibt.
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("./service-worker.js").catch(err => {
+      console.error("Service Worker konnte nicht registriert werden:", err);
+    });
+  });
+}
+</script>
+</body>
+</html>
