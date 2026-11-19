@@ -1,4 +1,4 @@
-const CACHE_NAME = "tribal-wars-planner-v1";
+const CACHE_NAME = "DS ZC Finder v1";
 const APP_FILES = [
   "./",
   "./index.html",
